@@ -2,6 +2,7 @@ import os
 import pickle
 
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms.v2 as transforms
 from numpy import load, random
@@ -71,7 +72,7 @@ def get_train_cifar10_dataloader(transform: None = None, rootdir: str = ROOT_DIR
 def get_val_cifar10_dataloader() -> DataLoader:
     ...
 
-def get_test_cifar10_dataloader(transform, rootdir: str = ROOT_DIR, batchsize: int = 32) -> DataLoader:
+def get_test_cifar10_dataloader(transform: Transform = DEFAULT_TRANSFORM, rootdir: str = ROOT_DIR, batchsize: int = 32) -> DataLoader:
     return get_dataloader(
         CIFAR10(rootdir, train=False, download=True, transform=transform),
         batchsize,
@@ -114,7 +115,13 @@ def train(train_loader, net, optimiser, criterion, device: str = "cuda") -> tupl
 
     return acc, train_loss
 
-def test(test_loader, net, criterion, device: str = "cuda", half: bool = False) -> tuple[float]:
+def test(
+        test_loader: DataLoader,
+        net: nn.Module,
+        criterion = nn.CrossEntropyLoss(),
+        device: str = "cuda",
+        half: bool = False,
+    ) -> tuple[float]:
     net.eval()
     test_loss = 0
     correct = 0
