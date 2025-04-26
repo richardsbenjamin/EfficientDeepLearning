@@ -37,10 +37,11 @@ def pickle_dump(to_pickle, file_name: str):
     with open(f"{file_name}.pkl", "wb") as f:
         pickle.dump(to_pickle, f)
 
-def print_size_of_model(model):
+def get_model_size_mb(model):
     torch.save(model.state_dict(), "temp.p")
-    print('Size (MB):', os.path.getsize("temp.p")/1e6)
+    size = os.path.getsize("temp.p")/1e6
     os.remove('temp.p')
+    return size
 
 def get_hyperparams() -> dict:
     with open("hyperparams/hp_best_params.pkl", 'rb') as f:
