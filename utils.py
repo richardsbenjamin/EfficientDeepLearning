@@ -2,6 +2,7 @@ import os
 import pickle
 
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms.v2 as transforms
 from numpy import load, random
@@ -9,14 +10,25 @@ from torch.utils.data import Subset
 from torch.utils.data.dataloader import DataLoader
 from torchvision.datasets import CIFAR10
 
-from _typing_ import Dataset, Optimizer, LRScheduler, Transform
+import models
+from hyperparams.hyperparams_dict import hp_categorical
+from transforms.transformations_dict import transformations
+
+from _typing_ import (
+    Dataset,
+    Optimizer,
+    LRScheduler,
+    Module,
+    Transform,
+)
 
 
-DEFAULT_TRANSFORM = transforms.Compose([
+DEFAULT_TRANSFORMS = [
     transforms.ToImage(),
     transforms.ToDtype(torch.float32, scale=True),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-])
+]
+DEFAULT_TRANSFORM = transforms.Compose(DEFAULT_TRANSFORMS)
 ROOT_DIR = "/opt/img/effdl-cifar10/"
 SPLITS_FILE = "cifar_train_val_splits.npz"
 
@@ -24,6 +36,31 @@ SPLITS_FILE = "cifar_train_val_splits.npz"
 def pickle_dump(to_pickle, file_name: str):
     with open(f"{file_name}.pkl", "wb") as f:
         pickle.dump(to_pickle, f)
+
+def print_size_of_model(model):
+    torch.save(model.state_dict(), "temp.p")
+    print('Size (MB):', os.path.getsize("temp.p")/1e6)
+    os.remove('temp.p')
+
+def get_hyperparams() -> dict:
+    with open("hyperparams/hp_best_params.pkl", 'rb') as f:
+        trial = pickle.load(f)
+    return trial.params
+
+def get_best_transformations() -> list:
+    with open("transforms/transforms_best_trial.pkl", "rb") as f:
+        res = pickle.load(f)
+
+    transforms_list = []
+    for var_name, bool_value in res["params"].items():
+        if bool_value:
+            transforms_list.append(
+                transformations[var_name.replace("use", "")],
+            )
+    return transforms.Compose([
+        *transforms_list,
+        *DEFAULT_TRANSFORMS,
+    ])
 
 def get_device():
     return 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -61,21 +98,47 @@ def get_cifar10_train_val_subsets(split_file: str = SPLITS_FILE, **train_kwargs:
     val_idx = split["val"]
     return Subset(dataset, train_idx), Subset(dataset, val_idx)
 
-def get_train_cifar10_dataloader(transform: None = None, rootdir: str = ROOT_DIR, batchsize: int = 32, subset: bool = False) -> DataLoader:
-    ...
+def get_train_cifar10_dataloader(transform: Transform = DEFAULT_TRANSFORM, rootdir: str = ROOT_DIR, batchsize: int = 32) -> DataLoader:
     return get_dataloader(
-        dataset,
+        CIFAR10(rootdir, train=True, download=True, transform=transform),
         batchsize,
     )
 
-def get_val_cifar10_dataloader() -> DataLoader:
-    ...
-
-def get_test_cifar10_dataloader(transform, rootdir: str = ROOT_DIR, batchsize: int = 32) -> DataLoader:
+def get_test_cifar10_dataloader(transform: Transform = DEFAULT_TRANSFORM, rootdir: str = ROOT_DIR, batchsize: int = 32) -> DataLoader:
     return get_dataloader(
         CIFAR10(rootdir, train=False, download=True, transform=transform),
         batchsize,
     )
+
+def load_untrained_model(model_name: str) -> Module:
+    hp_params = get_hyperparams()
+
+    model_class = getattr(models, model_name)
+    model = model_class()
+    device = get_device()
+    model.to(device)
+
+    optimiser = get_optimiser(
+        hp_params["optimizer"],
+        model.parameters(),
+        lr=hp_params["lr"],
+        weight_decay=hp_params["weight_decay"]
+    )
+
+    s_name = hp_params["lr_scheduler"]
+    scheduler = get_scheduler(
+        s_name,
+        optimiser,
+        **hp_categorical["lr_schedulers"]["params"][s_name]
+    )
+    criterion = nn.CrossEntropyLoss()
+
+    return {
+        "model": model,
+        "scheduler": scheduler,
+        "optimiser": optimiser,
+        "criterion": criterion,
+    }
 
 def get_optimiser(optimser_name: str, model_params, **optim_kwargs: dict) -> Optimizer:
     optim_class = getattr(optim, optimser_name)
@@ -91,8 +154,7 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
         **scheduler_params,
     )
 
-
-def train(train_loader, net, optimiser, criterion, device: str = "cuda") -> tuple[float]:
+def train(train_loader: DataLoader, net: nn.Module, optimiser: Optimizer, criterion, device: str = "cuda") -> tuple[float]:
     net.train()
     train_loss = 0
     correct = 0
@@ -114,7 +176,13 @@ def train(train_loader, net, optimiser, criterion, device: str = "cuda") -> tupl
 
     return acc, train_loss
 
-def test(test_loader, net, criterion, device: str = "cuda", half: bool = False) -> tuple[float]:
+def test(
+        test_loader: DataLoader,
+        net: nn.Module,
+        criterion = nn.CrossEntropyLoss(),
+        device: str = "cuda",
+        half: bool = False,
+    ) -> tuple[float]:
     net.eval()
     test_loss = 0
     correct = 0
@@ -136,12 +204,20 @@ def test(test_loader, net, criterion, device: str = "cuda", half: bool = False) 
     acc = 100.* correct / total
     return acc, test_loss
 
-def run_epochs(net, train_loader, test_loader, hyperparams: dict, start_epoch: int = 0, n_epochs: int = 200, device: str = "cuda"):
+def run_epochs(
+        net: Module,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        hyperparams: dict,
+        n_epochs: int = 200,
+        start_epoch: int = 0,
+        device: str = "cuda",
+    ):
     best_acc = 0
+    train_accs = []
+    test_accs = []
     for epoch in range(start_epoch, start_epoch+n_epochs):
-
         print('Epoch:', epoch)
-
         train_acc, train_loss = train(
             train_loader,
             net,
@@ -151,11 +227,14 @@ def run_epochs(net, train_loader, test_loader, hyperparams: dict, start_epoch: i
         )
         test_acc, test_loss = test(test_loader, net, hyperparams["criterion"], device)
 
+        train_accs.append(train_acc)
+        test_accs.append(test_acc)
+
         if test_acc > best_acc:
             save_checkpoint(net, test_acc, epoch)
             best_acc = test_acc
 
-    return best_acc
+    return best_acc, train_accs, test_accs
 
 def save_checkpoint(net, acc, epoch):
     print('Saving..')
