@@ -1,4 +1,5 @@
 from copy import deepcopy
+from binaryconnect import BC
 
 from hyperparams.hyperparams_dict import hp_categorical
 from utils import (
@@ -24,8 +25,8 @@ if __name__ == "__main__":
     test_loader = get_test_cifar10_dataloader()
 
     model, _ = load_trained_model()
-    model.half()
-    params_ref, ops_ref = count_nonzero_parameters(model), get_macs(model, half=True)
+    binnary_connect = BC(model)
+    params_ref, ops_ref = count_nonzero_parameters(binnary_connect), get_macs(binnary_connect)
     train_details = load_untrained_model("DenseNet121")
 
     prune_amounts = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
@@ -34,26 +35,25 @@ if __name__ == "__main__":
     retrain_res = []
     for amount in prune_amounts:
         print('AMOUNT: ', amount)
-        pruning_model = deepcopy(model)
+        pruning_model = deepcopy(binnary_connect)
 
         global_pruning(pruning_model, amount=amount)
 
         _, _, _ = run_epochs(
-            model,
+            binnary_connect,
             train_loader,
             val_loader,
             train_details,
             n_epochs=n_epochs,
-            half=True,
+            clip=True
         )
         test_acc, _ = test(
             test_loader,
             pruning_model,
-            half=True,
         )
 
-        remove_pruning(model)
-        params = count_nonzero_parameters(model)
+        remove_pruning(binnary_connect)
+        params = count_nonzero_parameters(binnary_connect)
 
         score = calculate_score(
             0, 1 - (params / params_ref), 16, 16, params, get_macs(pruning_model), params_ref, ops_ref
@@ -62,5 +62,5 @@ if __name__ == "__main__":
             (amount, test_acc, score)
         )
 
-    pickle_dump(retrain_res, "global_retrain_results_half_quant")
+    pickle_dump(retrain_res, "global_retrain_results_binary_connect")
 

@@ -156,7 +156,15 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
         **scheduler_params,
     )
 
-def train(train_loader: DataLoader, net: nn.Module, optimiser: Optimizer, criterion, device: str = "cuda", half: bool = False) -> tuple[float]:
+def train(
+        train_loader: DataLoader,
+        net: nn.Module,
+        optimiser: Optimizer,
+        criterion,
+        device: str = "cuda",
+        half: bool = False,
+        clip: bool = False,
+    ) -> tuple[float]:
     net.train()
     train_loss = 0
     correct = 0
@@ -170,6 +178,8 @@ def train(train_loader: DataLoader, net: nn.Module, optimiser: Optimizer, criter
         loss = criterion(outputs, targets)
         loss.backward()
         optimiser.step()
+        if clip:
+            net.clip()
 
         train_loss += loss.item()
         _, predicted = outputs.max(1)
@@ -217,6 +227,7 @@ def run_epochs(
         start_epoch: int = 0,
         device: str = "cuda",
         half: bool = False,
+        clip: bool = False,
     ):
     best_acc = 0
     train_accs = []
@@ -230,6 +241,7 @@ def run_epochs(
             hyperparams["criterion"],
             device,
             half=half,
+            clip=clip,
         )
         test_acc, test_loss = test(test_loader, net, hyperparams["criterion"], device, half)
 
