@@ -156,7 +156,7 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
         **scheduler_params,
     )
 
-def train(train_loader: DataLoader, net: nn.Module, optimiser: Optimizer, criterion, device: str = "cuda") -> tuple[float]:
+def train(train_loader: DataLoader, net: nn.Module, optimiser: Optimizer, criterion, device: str = "cuda", half: bool = False) -> tuple[float]:
     net.train()
     train_loss = 0
     correct = 0
@@ -164,6 +164,8 @@ def train(train_loader: DataLoader, net: nn.Module, optimiser: Optimizer, criter
     for inputs, targets in train_loader:
         inputs, targets = inputs.to(device), targets.to(device)
         optimiser.zero_grad()
+        if half:
+            inputs = inputs.half()
         outputs = net(inputs)
         loss = criterion(outputs, targets)
         loss.backward()
@@ -227,6 +229,7 @@ def run_epochs(
             hyperparams["optimiser"],
             hyperparams["criterion"],
             device,
+            half=half,
         )
         test_acc, test_loss = test(test_loader, net, hyperparams["criterion"], device, half)
 
@@ -332,3 +335,32 @@ def calculate_score(p_s, p_u, q_w, q_a, w, f, param_ref, ops_ref):
     param_score = ((1 - (p_s + p_u)) * (q_w / 32) * w) / param_ref
     ops_score = ((1 - p_s) * (max(q_w, q_a) / 32) * f) / ops_ref
     return param_score + ops_score
+
+def zero_out_pruned_filters(model, prune_ratio):
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):  
+            weight = module.weight.data
+            if weight is None:
+                continue
+
+            if hasattr(module, '_pruned_filters'):
+                pruned_filters = module._pruned_filters
+            else:
+                pruned_filters = []
+
+            remaining_filters = set(range(weight.shape[0])) - set(pruned_filters)
+            if not remaining_filters:
+                continue
+            remaining_filters = list(remaining_filters)
+            filter_norms = weight[remaining_filters].abs().sum(dim=(1, 2, 3) if isinstance(module, nn.Conv2d) else (1,))
+
+            _, sorted_indices = torch.sort(filter_norms)
+
+            num_filters_to_prune = int(prune_ratio * len(remaining_filters))
+
+            filters_to_zero = sorted_indices[:num_filters_to_prune]
+            filters_to_zero = [remaining_filters[idx] for idx in filters_to_zero]
+            weight[filters_to_zero] = 0
+            module._pruned_filters = pruned_filters + filters_to_zero
+            
+    return model

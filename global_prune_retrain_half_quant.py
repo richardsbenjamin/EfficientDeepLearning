@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     model, _ = load_trained_model()
     model.half()
-    params_ref, ops_ref = count_nonzero_parameters(model), get_macs(model)
+    params_ref, ops_ref = count_nonzero_parameters(model), get_macs(model, half=True)
     train_details = load_untrained_model("DenseNet121")
 
     prune_amounts = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
