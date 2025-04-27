@@ -3,6 +3,7 @@ import pickle
 
 import torch
 import torch.nn as nn
+import torch.nn.utils.prune as prune
 import torch.optim as optim
 import torchvision.transforms.v2 as transforms
 from numpy import load, random
@@ -213,6 +214,7 @@ def run_epochs(
         n_epochs: int = 200,
         start_epoch: int = 0,
         device: str = "cuda",
+        half: bool = False,
     ):
     best_acc = 0
     train_accs = []
@@ -226,7 +228,7 @@ def run_epochs(
             hyperparams["criterion"],
             device,
         )
-        test_acc, test_loss = test(test_loader, net, hyperparams["criterion"], device)
+        test_acc, test_loss = test(test_loader, net, hyperparams["criterion"], device, half)
 
         train_accs.append(train_acc)
         test_accs.append(test_acc)
@@ -247,3 +249,86 @@ def save_checkpoint(net, acc, epoch):
     if not os.path.isdir('train_checkpoint'):
         os.mkdir('train_checkpoint')
     torch.save(state, './train_checkpoint/train_ckpt.pth')
+
+def count_nonzero_parameters(model: nn.Module):
+    return sum(torch.count_nonzero(p).item() for p in model.parameters())
+
+def count_parameters(model, only_trainable=False):
+    if only_trainable:
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    else:
+        return sum(p.numel() for p in model.parameters())
+
+def global_pruning(model: nn.Module, amount: float):
+    parameters_to_prune = []
+    for module in model.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            parameters_to_prune.append((module, 'weight'))
+    prune.global_unstructured(
+        parameters_to_prune,
+        pruning_method=prune.L1Unstructured,
+        amount=amount,
+    )
+
+def remove_pruning(model):
+    for module in model.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            if hasattr(module, 'weight_orig'):
+                prune.remove(module, 'weight')
+
+def run_global_pruning(model: nn.Module, testloader: "DataLoader", amount: float, half: bool = False) -> tuple[int, float]:
+    global_pruning(model, amount=amount)
+    acc, _ = test(testloader, model, half=half)
+    remove_pruning(model)
+    params = count_nonzero_parameters(model)
+    return params, acc
+
+def load_trained_model(device: str = "cuda") -> nn.Module:
+    with open("train_results.pkl", "rb") as f:
+        res = pickle.load(f)
+    state_dict, acc, _, _ = res.values()
+
+    model = models.DenseNet121()
+    model.load_state_dict(state_dict)
+    model = model.to(device)
+    return model, acc
+
+def get_macs(model, input_size=(1, 3, 32, 32), device: str = "cuda", half: bool = False):
+    macs = 0
+    dummy_input = torch.randn(*input_size).to(device)
+
+    def conv_hook(module, input, output):
+        nonlocal macs
+        if isinstance(module, nn.Conv2d):
+            batch_size, out_channels, out_h, out_w = output.shape
+            in_channels, _, kernel_h, kernel_w = module.weight.shape
+
+            layer_macs = out_h * out_w * out_channels * kernel_h * kernel_w * in_channels
+            macs += layer_macs
+
+    def linear_hook(module, input, output):
+        nonlocal macs
+        if isinstance(module, nn.Linear):
+            in_features, out_features = module.weight.shape
+            layer_macs = in_features * out_features
+            macs += layer_macs
+
+    hooks = []
+    for layer in model.children():
+        if isinstance(layer, (nn.Conv2d, nn.Linear)):
+            hook = layer.register_forward_hook(conv_hook if isinstance(layer, nn.Conv2d) else linear_hook)
+            hooks.append(hook)
+
+    if half:
+        dummy_input = dummy_input.half()
+    model(dummy_input)
+
+    for hook in hooks:
+        hook.remove()
+
+    return macs
+
+def calculate_score(p_s, p_u, q_w, q_a, w, f, param_ref, ops_ref):
+    param_score = ((1 - (p_s + p_u)) * (q_w / 32) * w) / param_ref
+    ops_score = ((1 - p_s) * (max(q_w, q_a) / 32) * f) / ops_ref
+    return param_score + ops_score
