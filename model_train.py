@@ -11,7 +11,6 @@ from utils import (
 
 if __name__ == "__main__":
 
-
     train_transforms = get_best_transformations()
     train_loader, val_loader = get_cifar10_train_val_loaders(transform=train_transforms)
     test_loader = get_test_cifar10_dataloader()
