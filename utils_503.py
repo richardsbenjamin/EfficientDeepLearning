@@ -171,6 +171,8 @@ def train(
     total = 0
     for inputs, targets in train_loader:
         inputs, targets = inputs.to(device), targets.to(device)
+        if half:
+            inputs = inputs.half()
         optimiser.zero_grad()
         if half:
             inputs = inputs.half()
