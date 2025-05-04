@@ -89,5 +89,9 @@ class BC():
         return self.forward(x)
     
     def __getattr__(self, attr_name: str):
-        return getattr(self.model, attr_name)
+        model = self.__dict__.get("model", None)
+        if model is None:
+            raise AttributeError(f"'BC' object has no attribute '{attr_name}' (model not set yet)")
+        return getattr(model, attr_name)
+
     
