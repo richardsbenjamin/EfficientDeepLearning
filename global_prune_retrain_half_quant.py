@@ -39,7 +39,7 @@ if __name__ == "__main__":
         global_pruning(pruning_model, amount=amount)
 
         _, _, _ = run_epochs(
-            model,
+            pruning_model,
             train_loader,
             val_loader,
             train_details,
@@ -52,8 +52,8 @@ if __name__ == "__main__":
             half=True,
         )
 
-        remove_pruning(model)
-        params = count_nonzero_parameters(model)
+        remove_pruning(pruning_model)
+        params = count_nonzero_parameters(pruning_model)
 
         score = calculate_score(
             0, 1 - (params / params_ref), 16, 16, params, get_macs(pruning_model), params_ref, ops_ref
