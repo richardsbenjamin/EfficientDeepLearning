@@ -112,14 +112,17 @@ def get_test_cifar10_dataloader(transform: Transform = DEFAULT_TRANSFORM, rootdi
         batchsize,
     )
 
-def load_untrained_model(model_name: str) -> Module:
+def load_untrained_model(model_name: str = "") -> Module:
     """['model', 'scheduler', 'optimiser', 'criterion']"""
     hp_params = get_hyperparams()
 
-    model_class = getattr(models, model_name)
-    model = model_class()
-    device = get_device()
-    model.to(device)
+    if model_name:
+        model_class = getattr(models, model_name)
+        model = model_class()
+        device = get_device()
+        model.to(device)
+    else:
+        model = None
 
     optimiser = get_optimiser(
         hp_params["optimizer"],
