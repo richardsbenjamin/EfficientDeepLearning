@@ -17,9 +17,9 @@ if __name__ == "__main__":
     test_loader = get_test_cifar10_dataloader()
 
     get_functions = [
-        "increasing_grouped_densenet121",
-        "transition_grouped_densenet121",
-        # "increasing_transition_grouped_densenet121",
+       # "increasing_grouped_densenet121",
+       # "transition_grouped_densenet121",
+        "increasing_transition_grouped_densenet121",
     ]
 
     n_epochs = 200
