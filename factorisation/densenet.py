@@ -12,6 +12,25 @@ def get_groups(in_channels, out_channels):
         return 1
     return max_possible_groups
 
+class BottleneckDepthWise(nn.Module):
+    def __init__(self, in_planes, growth_rate):
+        super(BottleneckDepthWise, self).__init__()
+        inter_planes = 4 * growth_rate
+
+        self.bn1 = nn.BatchNorm2d(in_planes)
+        self.conv1 = nn.Conv2d(in_planes, inter_planes, kernel_size=1, bias=False)
+
+        self.bn2 = nn.BatchNorm2d(inter_planes)
+        self.dwconv = nn.Conv2d(inter_planes, inter_planes, kernel_size=3, padding=1, groups=inter_planes, bias=False)  # depthwise
+        self.pwconv = nn.Conv2d(inter_planes, growth_rate, kernel_size=1, bias=False)  # pointwise
+
+    def forward(self, x):
+        out = self.conv1(F.relu(self.bn1(x)))             # 1x1 conv
+        out = self.dwconv(F.relu(self.bn2(out)))          # depthwise 3x3
+        out = self.pwconv(out)                            # pointwise 1x1
+        out = torch.cat([out, x], 1)
+        return out
+
 
 class Bottleneck(nn.Module):
     def __init__(
@@ -45,6 +64,16 @@ class Bottleneck(nn.Module):
         out = self.conv2(F.relu(self.bn2(out)))
         out = torch.cat([out,x], 1)
         return out
+    
+
+class BottleneckDepthWise(Bottleneck):
+    def __init__(self, in_planes, growth_rate):
+        super(GroupedCroissantBottleneck, self).__init__(
+            in_planes,
+            growth_rate,
+            get_groups(in_planes, 4*growth_rate),
+            get_groups(4*growth_rate, growth_rate),
+        )
 
 
 class GroupedCroissantBottleneck(Bottleneck):

@@ -290,6 +290,23 @@ def global_pruning(model: nn.Module, amount: float):
         amount=amount,
     )
 
+def combined_pruning(model: nn.Module, amount_structured: float, amount_unstructured: float):
+    parameters_to_prune = []
+
+    for module in model.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            prune.ln_structured(module, name='weight', amount=amount_structured, n=2, dim=0)
+            parameters_to_prune.append((module, 'weight')) 
+
+    prune.global_unstructured(
+        parameters_to_prune,
+        pruning_method=prune.L1Unstructured,
+        amount=amount_unstructured,
+    )
+
+    for module, _ in parameters_to_prune:
+        prune.remove(module, 'weight')
+
 def remove_pruning(model):
     for module in model.modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
