@@ -19,7 +19,7 @@ if __name__ == "__main__":
     get_functions = [
         "increasing_grouped_densenet121",
         "transition_grouped_densenet121",
-        # "increasing_transition_grouped_densenet121",
+        "increasing_transition_grouped_densenet121",
     ]
 
     n_epochs = 200
