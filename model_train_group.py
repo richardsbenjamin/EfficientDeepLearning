@@ -18,11 +18,7 @@ if __name__ == "__main__":
 
     get_functions = [
         "increasing_grouped_densenet121",
-<<<<<<< HEAD:model_train_group_503.py
-        "transition_grouped_densenet121",
-=======
      	"transition_grouped_densenet121",
->>>>>>> dc6f548397f56798aa38bebb01cb9eed203c9b13:model_train_group.py
         "increasing_transition_grouped_densenet121",
     ]
 
