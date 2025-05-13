@@ -20,6 +20,10 @@ hp_floats = {
     "momentum": {"low": 0.4, "high": 0.9},
     "weight_decay": {"low": 5e-4, "high": 1e-3},
 }
+model_functions = {
+    "grouped1": get_increasing_grouped_densenet121,
+    "grouped2": None,
+}
 
 
 def objective(
@@ -34,8 +38,7 @@ def objective(
         hp_name: trial.suggest_float(hp_name, **hp_params)
         for hp_name, hp_params in hp_floats.items()
     }
-
-    model = getattr(models, model_name)().to(device)
+    model = model_functions[model_name]().to(device)
 
     del algo_hyperparams["momentum"]
     optimiser = get_optimiser(
@@ -71,13 +74,12 @@ if __name__ == "__main__":
     train_loader, val_loader = get_cifar10_train_val_loaders()
 
     # grouped1
-    model_name = "model_grouped1"
-    model = get_increasing_grouped_densenet121() 
+    model_name = "grouped1"
 
     study = optuna.create_study(direction="maximize")
-    study.optimize(lambda x: objective(x, model, train_loader, val_loader, 10, device), n_trials=30)
+    study.optimize(lambda x: objective(x, model_name, train_loader, val_loader, 10, device), n_trials=30)
 
     pickle_dump(study.best_trial, f"hp_best_trial_{model_name}")
 
-    print(f"RUN SUCCESS {model}")
+    print(f"RUN SUCCESS {model_name}")
 

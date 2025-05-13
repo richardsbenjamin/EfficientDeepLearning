@@ -160,39 +160,58 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
     )
 
 def train(
-        train_loader: DataLoader,
-        net: nn.Module,
-        optimiser: Optimizer,
-        criterion,
-        device: str = "cuda",
-        half: bool = False,
-        clip: bool = False,
-    ) -> tuple[float]:
+    train_loader: DataLoader,
+    net: nn.Module,
+    optimiser: Optimizer,
+    criterion,
+    device: str = "cuda",
+    half: bool = False,
+    clip: bool = False,
+    mixup: bool = False,
+) -> tuple[float, float]:
     net.train()
-    train_loss = 0
+    train_loss = 0.0
     correct = 0
     total = 0
+
     for inputs, targets in train_loader:
         inputs, targets = inputs.to(device), targets.to(device)
         if half:
             inputs = inputs.half()
+
         optimiser.zero_grad()
-        if half:
-            inputs = inputs.half()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
+
+        if mixup:
+            index = torch.randperm(inputs.size(0)).to(device)
+            inputs_perm = inputs[index]
+            targets_perm = targets[index]
+
+            lam = random.random()
+            inputs_mix = lam * inputs + (1 - lam) * inputs_perm
+            outputs = net(inputs_mix)
+
+            loss = lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
+        else:
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
+
         loss.backward()
         optimiser.step()
+
         if clip:
             net.clip()
 
         train_loss += loss.item()
         _, predicted = outputs.max(1)
-        total += targets.size(0)
-        correct += predicted.eq(targets).sum().item()
 
-    acc = 100.* correct / total
+        if mixup:
+            total += 0
+            correct += 0
+        else:
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
 
+    acc = 100. * correct / total if total > 0 else 0.0
     return acc, train_loss
 
 def test(
@@ -224,21 +243,24 @@ def test(
     return acc, test_loss
 
 def run_epochs(
-        net: Module,
-        train_loader: DataLoader,
-        test_loader: DataLoader,
-        hyperparams: dict,
-        n_epochs: int = 200,
-        start_epoch: int = 0,
-        device: str = "cuda",
-        half: bool = False,
-        clip: bool = False,
-    ):
+    net: Module,
+    train_loader: DataLoader,
+    test_loader: DataLoader,
+    hyperparams: dict,
+    n_epochs: int = 200,
+    start_epoch: int = 0,
+    device: str = "cuda",
+    half: bool = False,
+    clip: bool = False,
+    mixup: bool = False,
+):
     best_acc = 0
     train_accs = []
     test_accs = []
-    for epoch in range(start_epoch, start_epoch+n_epochs):
-        print('Epoch:', epoch)
+
+    for epoch in range(start_epoch, start_epoch + n_epochs):
+        print(f"\nEpoch {epoch}")
+
         train_acc, train_loss = train(
             train_loader,
             net,
@@ -247,8 +269,16 @@ def run_epochs(
             device,
             half=half,
             clip=clip,
+            mixup=mixup
         )
-        test_acc, test_loss = test(test_loader, net, hyperparams["criterion"], device, half)
+
+        test_acc, test_loss = test(
+            test_loader,
+            net,
+            hyperparams["criterion"],
+            device,
+            half
+        )
 
         train_accs.append(train_acc)
         test_accs.append(test_acc)
