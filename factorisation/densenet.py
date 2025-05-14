@@ -1,5 +1,8 @@
 import math
-from typing import Type
+from typing import (
+    Type,
+    Union
+)
 
 import torch
 import torch.nn as nn
@@ -117,37 +120,42 @@ class DenseNet(nn.Module):
     def __init__(
             self,
             nblocks: list[int],
-            block: Type[Bottleneck],
+            block: Union[Type[Bottleneck], list[Type[Bottleneck]]],
             transition: Type[Transition],
             growth_rate: int = 12,
             reduction: float = 0.5,
             num_classes: int= 10,
         ) -> None:
         super(DenseNet, self).__init__()
+        
+        if not isinstance(block, list):
+            block = [block] * 2
+        self.block = block
+        
         self.growth_rate = growth_rate
 
         num_planes = 2*growth_rate
         self.conv1 = nn.Conv2d(3, num_planes, kernel_size=3, padding=1, bias=False)
 
-        self.dense1 = self._make_dense_layers(block, num_planes, nblocks[0])
+        self.dense1 = self._make_dense_layers(self.block, num_planes, nblocks[0])
         num_planes += nblocks[0]*growth_rate
         out_planes = int(math.floor(num_planes*reduction))
         self.trans1 = transition(num_planes, out_planes)
         num_planes = out_planes
 
-        self.dense2 = self._make_dense_layers(block, num_planes, nblocks[1])
+        self.dense2 = self._make_dense_layers(self.block, num_planes, nblocks[1])
         num_planes += nblocks[1]*growth_rate
         out_planes = int(math.floor(num_planes*reduction))
         self.trans2 = transition(num_planes, out_planes)
         num_planes = out_planes
 
-        self.dense3 = self._make_dense_layers(block, num_planes, nblocks[2])
+        self.dense3 = self._make_dense_layers(self.block, num_planes, nblocks[2])
         num_planes += nblocks[2]*growth_rate
         out_planes = int(math.floor(num_planes*reduction))
         self.trans3 = transition(num_planes, out_planes)
         num_planes = out_planes
 
-        self.dense4 = self._make_dense_layers(block, num_planes, nblocks[3])
+        self.dense4 = self._make_dense_layers(self.block, num_planes, nblocks[3])
         num_planes += nblocks[3]*growth_rate
 
         self.bn = nn.BatchNorm2d(num_planes)
@@ -155,9 +163,19 @@ class DenseNet(nn.Module):
 
     def _make_dense_layers(self, block, in_planes, nblock):
         layers = []
+        
+        non_factorised_block = block[0]
+        factorised_block = block[0] if len(block) == 1 else block[1]
+        
         for i in range(nblock):
-            layers.append(block(in_planes, self.growth_rate))
+            
+            if i % 2 == 0:
+                layers.append(non_factorised_block(in_planes, self.growth_rate))
+            else:
+                layers.append(factorised_block(in_planes, self.growth_rate))
+                
             in_planes += self.growth_rate
+            
         return nn.Sequential(*layers)
 
     def forward(self, x):
@@ -182,3 +200,6 @@ def get_transition_grouped_densenet121():
 
 def get_increasing_transition_grouped_densenet121():
     return DenseNet([6,12,24,16], GroupedCroissantBottleneck, GroupedTransition, growth_rate=32)
+
+def get_increasing_mix_bottlenecks_densenet121():
+    return DenseNet([6,12,24,16], [Bottleneck, GroupedCroissantBottleneck], Transition, growth_rate=32)
