@@ -44,8 +44,8 @@ def get_model_size_mb(model):
     os.remove('temp.p')
     return size
 
-def get_hyperparams() -> dict:
-    with open("hyperparams/hp_best_params.pkl", 'rb') as f:
+def get_hyperparams(file_name: str = "hp_best_params") -> dict:
+    with open(f"hyperparams/{file_name}.pkl", 'rb') as f:
         trial = pickle.load(f)
     return trial.params
 
@@ -112,9 +112,9 @@ def get_test_cifar10_dataloader(transform: Transform = DEFAULT_TRANSFORM, rootdi
         batchsize,
     )
 
-def load_untrained_model(model: str | Module) -> Module:
+def load_untrained_model(model: str | Module, hp_param_file: str = "hp_best_params") -> Module:
     """['model', 'scheduler', 'optimiser', 'criterion']"""
-    hp_params = get_hyperparams()
+    hp_params = get_hyperparams(hp_param_file)
 
     if isinstance(model, str):
         model_class = getattr(models, model)
@@ -124,13 +124,13 @@ def load_untrained_model(model: str | Module) -> Module:
     model.to(device)
 
     optimiser = get_optimiser(
-        hp_params["optimizer"],
+        hp_params.get("optimizer", "AdamW"),
         model.parameters(),
         lr=hp_params["lr"],
         weight_decay=hp_params["weight_decay"]
     )
 
-    s_name = hp_params["lr_scheduler"]
+    s_name = hp_params.get("lr_scheduler", "CosineAnnealingLR")
     scheduler = get_scheduler(
         s_name,
         optimiser,
@@ -253,6 +253,7 @@ def run_epochs(
     half: bool = False,
     clip: bool = False,
     mixup: bool = False,
+    checkpoint_file_name: str = "train_ckpt",
 ):
     best_acc = 0
     train_accs = []
@@ -261,7 +262,7 @@ def run_epochs(
     for epoch in range(start_epoch, start_epoch + n_epochs):
         print(f"\nEpoch {epoch}")
 
-        train_acc, train_loss = train(
+        train_acc, _ = train(
             train_loader,
             net,
             hyperparams["optimiser"],
@@ -271,25 +272,23 @@ def run_epochs(
             clip=clip,
             mixup=mixup
         )
-
-        test_acc, test_loss = test(
+        test_acc, _ = test(
             test_loader,
             net,
             hyperparams["criterion"],
             device,
             half
         )
-
         train_accs.append(train_acc)
         test_accs.append(test_acc)
 
         if test_acc > best_acc:
-            save_checkpoint(net, test_acc, epoch)
+            save_checkpoint(net, test_acc, epoch, checkpoint_file_name)
             best_acc = test_acc
 
     return best_acc, train_accs, test_accs
 
-def save_checkpoint(net, acc, epoch):
+def save_checkpoint(net, acc, epoch, filename: str = "train_ckpt"):
     print('Saving..')
     state = {
         'net': net.state_dict(),
@@ -298,7 +297,7 @@ def save_checkpoint(net, acc, epoch):
     }
     if not os.path.isdir('train_checkpoint'):
         os.mkdir('train_checkpoint')
-    torch.save(state, './train_checkpoint/train_ckpt.pth')
+    torch.save(state, f'./train_checkpoint/{filename}.pth')
 
 def count_nonzero_parameters(model: nn.Module):
     return sum(torch.count_nonzero(p).item() for p in model.parameters())

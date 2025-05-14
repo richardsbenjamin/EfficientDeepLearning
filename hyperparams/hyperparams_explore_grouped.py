@@ -4,7 +4,7 @@ import torch.nn as nn
 import models
 from _typing_ import DataLoader
 from hyperparams.hyperparams_dict import hp_categorical
-from factorisation.densenet import get_increasing_grouped_densenet121
+from factorisation.densenet import get_increasing_grouped_densenet121, get_increasing_mix_bottlenecks_densenet121
 from utils import (
     get_cifar10_train_val_loaders,
     get_device,
@@ -22,7 +22,7 @@ hp_floats = {
 }
 model_functions = {
     "grouped1": get_increasing_grouped_densenet121,
-    "grouped2": None,
+    "grouped2": get_increasing_mix_bottlenecks_densenet121,
 }
 
 
@@ -73,8 +73,7 @@ if __name__ == "__main__":
     device = get_device()
     train_loader, val_loader = get_cifar10_train_val_loaders()
 
-    # grouped1
-    model_name = "grouped1"
+    model_name = "grouped2"
 
     study = optuna.create_study(direction="maximize")
     study.optimize(lambda x: objective(x, model_name, train_loader, val_loader, 10, device), n_trials=30)
