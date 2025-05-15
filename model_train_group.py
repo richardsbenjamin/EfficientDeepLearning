@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     n_epochs = 300
 
-    grouped_type = "grouped1"
+    grouped_type = "grouped2"
 
     model = model_functions[grouped_type]()
     train_details = load_untrained_model(model, f"hp_best_trial_{grouped_type}")
