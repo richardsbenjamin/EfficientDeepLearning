@@ -159,6 +159,17 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
         **scheduler_params,
     )
 
+def calculate_mix_up_loss(net, criterion, inputs, targets, device):
+    index = torch.randperm(inputs.size(0)).to(device)
+    inputs_perm = inputs[index]
+    targets_perm = targets[index]
+
+    lam = random.random()
+    inputs_mix = lam * inputs + (1 - lam) * inputs_perm
+    outputs = net(inputs_mix)
+
+    return lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
+
 def train(
     train_loader: DataLoader,
     net: nn.Module,
@@ -182,15 +193,7 @@ def train(
         optimiser.zero_grad()
 
         if mixup:
-            index = torch.randperm(inputs.size(0)).to(device)
-            inputs_perm = inputs[index]
-            targets_perm = targets[index]
-
-            lam = random.random()
-            inputs_mix = lam * inputs + (1 - lam) * inputs_perm
-            outputs = net(inputs_mix)
-
-            loss = lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
+            loss = calculate_mix_up_loss(net, criterion, inputs, targets, device)
         else:
             outputs = net(inputs)
             loss = criterion(outputs, targets)
@@ -204,10 +207,7 @@ def train(
         train_loss += loss.item()
         _, predicted = outputs.max(1)
 
-        if mixup:
-            total += 0
-            correct += 0
-        else:
+        if not mixup:
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
 
