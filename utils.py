@@ -300,7 +300,7 @@ def run_epochs(
             device,
             half=half,
             clip=clip,
-            mixup=mixup
+            mixup=mixup,
             teacher=teacher,
         )
         test_acc, _ = test(
