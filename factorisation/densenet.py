@@ -192,6 +192,9 @@ class DenseNet(nn.Module):
 def get_standard_densnet121():
     return DenseNet([6,12,24,16], Bottleneck, Transition, growth_rate=32)
 
+def get_student_densenet(growth_rate: int = 24) -> DenseNet:
+    return DenseNet([4, 8, 16, 8], Bottleneck, Transition, growth_rate=growth_rate)
+
 def get_increasing_grouped_densenet121():
     return DenseNet([6,12,24,16], GroupedCroissantBottleneck, Transition, growth_rate=32)
 

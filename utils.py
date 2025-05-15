@@ -3,6 +3,7 @@ import pickle
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 import torch.optim as optim
 import torchvision.transforms.v2 as transforms
@@ -20,6 +21,7 @@ from _typing_ import (
     Optimizer,
     LRScheduler,
     Module,
+    Tensor,
     Transform,
 )
 
@@ -159,7 +161,13 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
         **scheduler_params,
     )
 
-def calculate_mix_up_loss(net, criterion, inputs, targets, device):
+def calculate_mix_up_loss(
+        net: Module,
+        criterion,
+        inputs: Tensor,
+        targets: Tensor,
+        device: str = "cuda",
+    ) -> Tensor:
     index = torch.randperm(inputs.size(0)).to(device)
     inputs_perm = inputs[index]
     targets_perm = targets[index]
@@ -167,8 +175,26 @@ def calculate_mix_up_loss(net, criterion, inputs, targets, device):
     lam = random.random()
     inputs_mix = lam * inputs + (1 - lam) * inputs_perm
     outputs = net(inputs_mix)
+    loss = lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
 
-    return lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
+    return loss, outputs
+
+def distillation_loss(student_logits, teacher_logits, labels, temperature=4.0, alpha=0.7):
+    hard_loss = F.cross_entropy(student_logits, labels)
+    
+    soft_teacher_probs = F.log_softmax(teacher_logits / temperature, dim=1)
+    soft_student_probs = F.log_softmax(student_logits / temperature, dim=1)
+    kd_loss = F.kl_div(soft_student_probs, soft_teacher_probs, reduction='batchmean', log_target=True)
+
+    return alpha * temperature * temperature * kd_loss + (1 - alpha) * hard_loss
+
+def calculate_distillation_loss(student, teacher, inputs, targets) -> Tensor:
+    teacher.eval()
+    with torch.no_grad():
+        teacher_output = teacher(inputs)
+    student_output = student(inputs)
+    loss = distillation_loss(student_output, teacher_output, targets)
+    return loss, student_output
 
 def train(
     train_loader: DataLoader,
@@ -179,6 +205,7 @@ def train(
     half: bool = False,
     clip: bool = False,
     mixup: bool = False,
+    teacher: Module | None = None,
 ) -> tuple[float, float]:
     net.train()
     train_loss = 0.0
@@ -193,7 +220,9 @@ def train(
         optimiser.zero_grad()
 
         if mixup:
-            loss = calculate_mix_up_loss(net, criterion, inputs, targets, device)
+            loss, outputs = calculate_mix_up_loss(net, criterion, inputs, targets, device)
+        elif teacher is not None:
+            loss, outputs = calculate_distillation_loss(net, teacher, inputs, targets)
         else:
             outputs = net(inputs)
             loss = criterion(outputs, targets)
@@ -243,18 +272,19 @@ def test(
     return acc, test_loss
 
 def run_epochs(
-    net: Module,
-    train_loader: DataLoader,
-    test_loader: DataLoader,
-    hyperparams: dict,
-    n_epochs: int = 200,
-    start_epoch: int = 0,
-    device: str = "cuda",
-    half: bool = False,
-    clip: bool = False,
-    mixup: bool = False,
-    checkpoint_file_name: str = "train_ckpt",
-):
+        net: Module,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        hyperparams: dict,
+        n_epochs: int = 200,
+        start_epoch: int = 0,
+        device: str = "cuda",
+        half: bool = False,
+        clip: bool = False,
+        mixup: bool = False,
+        teacher: Module | None = None,
+        checkpoint_file_name: str = "train_ckpt",
+    ) -> tuple:
     best_acc = 0
     train_accs = []
     test_accs = []
@@ -271,6 +301,7 @@ def run_epochs(
             half=half,
             clip=clip,
             mixup=mixup
+            teacher=teacher,
         )
         test_acc, _ = test(
             test_loader,
