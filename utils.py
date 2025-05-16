@@ -396,25 +396,26 @@ def get_macs(model, input_size=(1, 3, 32, 32), device: str = "cuda", half: bool 
 
     def conv_hook(module, input, output):
         nonlocal macs
-        if isinstance(module, nn.Conv2d):
-            batch_size, out_channels, out_h, out_w = output.shape
-            in_channels, _, kernel_h, kernel_w = module.weight.shape
-
-            layer_macs = out_h * out_w * out_channels * kernel_h * kernel_w * in_channels
-            macs += layer_macs
+        batch_size, out_channels, out_h, out_w = output.shape
+        weight = module.weight
+        
+        nz = (weight != 0).float()
+        nz_per_filter = nz.sum(dim=(1,2,3))
+        
+        layer_macs = out_h * out_w * nz_per_filter.sum().item()
+        macs += layer_macs
 
     def linear_hook(module, input, output):
         nonlocal macs
-        if isinstance(module, nn.Linear):
-            in_features, out_features = module.weight.shape
-            layer_macs = in_features * out_features
-            macs += layer_macs
+        weight = module.weight
+        macs += (weight != 0).sum().item()
 
     hooks = []
-    for layer in model.children():
-        if isinstance(layer, (nn.Conv2d, nn.Linear)):
-            hook = layer.register_forward_hook(conv_hook if isinstance(layer, nn.Conv2d) else linear_hook)
-            hooks.append(hook)
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):
+            hooks.append(layer.register_forward_hook(conv_hook))
+        elif isinstance(layer, nn.Linear):
+            hooks.append(layer.register_forward_hook(linear_hook))
 
     if half:
         dummy_input = dummy_input.half()
