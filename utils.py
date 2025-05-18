@@ -13,6 +13,7 @@ from torch.utils.data.dataloader import DataLoader
 from torchvision.datasets import CIFAR10
 
 import models
+from factorisation import model_functions
 from hyperparams.hyperparams_dict import hp_categorical
 from transforms.transformations_dict import transformations
 
@@ -380,7 +381,7 @@ def run_global_pruning(model: nn.Module, testloader: "DataLoader", amount: float
     params = count_nonzero_parameters(model)
     return params, acc
 
-def load_trained_model(device: str = "cuda") -> nn.Module:
+def load_trained_model(device: str = "cuda") -> tuple[Module, float]:
     with open("train_results.pkl", "rb") as f:
         res = pickle.load(f)
     state_dict, acc, _, _ = res.values()
@@ -389,6 +390,13 @@ def load_trained_model(device: str = "cuda") -> nn.Module:
     model.load_state_dict(state_dict)
     model = model.to(device)
     return model, acc
+
+def load_trained_grouped_model(group_type: str, device: str = "cuda") -> Module:
+    res = torch.load("train_checkpoint/model_train_grouped1.pth")
+    grouped_model = model_functions[group_type]()
+    grouped_model.load_state_dict(res["net"])
+    grouped_model.to(device)
+    return grouped_model
 
 def get_macs(model, input_size=(1, 3, 32, 32), device: str = "cuda", half: bool = False):
     macs = 0
