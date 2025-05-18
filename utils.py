@@ -3,6 +3,7 @@ import pickle
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.utils.prune as prune
 import torch.optim as optim
 import torchvision.transforms.v2 as transforms
@@ -12,6 +13,7 @@ from torch.utils.data.dataloader import DataLoader
 from torchvision.datasets import CIFAR10
 
 import models
+from factorisation import model_functions
 from hyperparams.hyperparams_dict import hp_categorical
 from transforms.transformations_dict import transformations
 
@@ -20,6 +22,7 @@ from _typing_ import (
     Optimizer,
     LRScheduler,
     Module,
+    Tensor,
     Transform,
 )
 
@@ -159,6 +162,41 @@ def get_scheduler(scheduler_name: str, optimiser: Optimizer, **scheduler_params:
         **scheduler_params,
     )
 
+def calculate_mix_up_loss(
+        net: Module,
+        criterion,
+        inputs: Tensor,
+        targets: Tensor,
+        device: str = "cuda",
+    ) -> Tensor:
+    index = torch.randperm(inputs.size(0)).to(device)
+    inputs_perm = inputs[index]
+    targets_perm = targets[index]
+
+    lam = random.random()
+    inputs_mix = lam * inputs + (1 - lam) * inputs_perm
+    outputs = net(inputs_mix)
+    loss = lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
+
+    return loss, outputs
+
+def distillation_loss(student_logits, teacher_logits, labels, temperature=4.0, alpha=0.7):
+    hard_loss = F.cross_entropy(student_logits, labels)
+    
+    soft_teacher_probs = F.log_softmax(teacher_logits / temperature, dim=1)
+    soft_student_probs = F.log_softmax(student_logits / temperature, dim=1)
+    kd_loss = F.kl_div(soft_student_probs, soft_teacher_probs, reduction='batchmean', log_target=True)
+
+    return alpha * temperature * temperature * kd_loss + (1 - alpha) * hard_loss
+
+def calculate_distillation_loss(student, teacher, inputs, targets) -> Tensor:
+    teacher.eval()
+    with torch.no_grad():
+        teacher_output = teacher(inputs)
+    student_output = student(inputs)
+    loss = distillation_loss(student_output, teacher_output, targets)
+    return loss, student_output
+
 def train(
     train_loader: DataLoader,
     net: nn.Module,
@@ -168,6 +206,7 @@ def train(
     half: bool = False,
     clip: bool = False,
     mixup: bool = False,
+    teacher: Module | None = None,
 ) -> tuple[float, float]:
     net.train()
     train_loss = 0.0
@@ -182,15 +221,9 @@ def train(
         optimiser.zero_grad()
 
         if mixup:
-            index = torch.randperm(inputs.size(0)).to(device)
-            inputs_perm = inputs[index]
-            targets_perm = targets[index]
-
-            lam = random.random()
-            inputs_mix = lam * inputs + (1 - lam) * inputs_perm
-            outputs = net(inputs_mix)
-
-            loss = lam * criterion(outputs, targets) + (1 - lam) * criterion(outputs, targets_perm)
+            loss, outputs = calculate_mix_up_loss(net, criterion, inputs, targets, device)
+        elif teacher is not None:
+            loss, outputs = calculate_distillation_loss(net, teacher, inputs, targets)
         else:
             outputs = net(inputs)
             loss = criterion(outputs, targets)
@@ -204,10 +237,7 @@ def train(
         train_loss += loss.item()
         _, predicted = outputs.max(1)
 
-        if mixup:
-            total += 0
-            correct += 0
-        else:
+        if not mixup:
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
 
@@ -243,18 +273,19 @@ def test(
     return acc, test_loss
 
 def run_epochs(
-    net: Module,
-    train_loader: DataLoader,
-    test_loader: DataLoader,
-    hyperparams: dict,
-    n_epochs: int = 200,
-    start_epoch: int = 0,
-    device: str = "cuda",
-    half: bool = False,
-    clip: bool = False,
-    mixup: bool = False,
-    checkpoint_file_name: str = "train_ckpt",
-):
+        net: Module,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        hyperparams: dict,
+        n_epochs: int = 200,
+        start_epoch: int = 0,
+        device: str = "cuda",
+        half: bool = False,
+        clip: bool = False,
+        mixup: bool = False,
+        teacher: Module | None = None,
+        checkpoint_file_name: str = "train_ckpt",
+    ) -> tuple:
     best_acc = 0
     train_accs = []
     test_accs = []
@@ -270,7 +301,8 @@ def run_epochs(
             device,
             half=half,
             clip=clip,
-            mixup=mixup
+            mixup=mixup,
+            teacher=teacher,
         )
         test_acc, _ = test(
             test_loader,
@@ -349,7 +381,7 @@ def run_global_pruning(model: nn.Module, testloader: "DataLoader", amount: float
     params = count_nonzero_parameters(model)
     return params, acc
 
-def load_trained_model(device: str = "cuda") -> nn.Module:
+def load_trained_model(device: str = "cuda") -> tuple[Module, float]:
     with open("train_results.pkl", "rb") as f:
         res = pickle.load(f)
     state_dict, acc, _, _ = res.values()
@@ -359,31 +391,39 @@ def load_trained_model(device: str = "cuda") -> nn.Module:
     model = model.to(device)
     return model, acc
 
+def load_trained_grouped_model(group_type: str, device: str = "cuda") -> Module:
+    res = torch.load("train_checkpoint/model_train_grouped1.pth")
+    grouped_model = model_functions[group_type]()
+    grouped_model.load_state_dict(res["net"])
+    grouped_model.to(device)
+    return grouped_model
+
 def get_macs(model, input_size=(1, 3, 32, 32), device: str = "cuda", half: bool = False):
     macs = 0
     dummy_input = torch.randn(*input_size).to(device)
 
     def conv_hook(module, input, output):
         nonlocal macs
-        if isinstance(module, nn.Conv2d):
-            batch_size, out_channels, out_h, out_w = output.shape
-            in_channels, _, kernel_h, kernel_w = module.weight.shape
-
-            layer_macs = out_h * out_w * out_channels * kernel_h * kernel_w * in_channels
-            macs += layer_macs
+        batch_size, out_channels, out_h, out_w = output.shape
+        weight = module.weight
+        
+        nz = (weight != 0).float()
+        nz_per_filter = nz.sum(dim=(1,2,3))
+        
+        layer_macs = out_h * out_w * nz_per_filter.sum().item()
+        macs += layer_macs
 
     def linear_hook(module, input, output):
         nonlocal macs
-        if isinstance(module, nn.Linear):
-            in_features, out_features = module.weight.shape
-            layer_macs = in_features * out_features
-            macs += layer_macs
+        weight = module.weight
+        macs += (weight != 0).sum().item()
 
     hooks = []
-    for layer in model.children():
-        if isinstance(layer, (nn.Conv2d, nn.Linear)):
-            hook = layer.register_forward_hook(conv_hook if isinstance(layer, nn.Conv2d) else linear_hook)
-            hooks.append(hook)
+    for name, layer in model.named_modules():
+        if isinstance(layer, nn.Conv2d):
+            hooks.append(layer.register_forward_hook(conv_hook))
+        elif isinstance(layer, nn.Linear):
+            hooks.append(layer.register_forward_hook(linear_hook))
 
     if half:
         dummy_input = dummy_input.half()

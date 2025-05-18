@@ -2,14 +2,14 @@ from hyperparams.hyperparams_dict import hp_categorical
 from factorisation import model_functions
 from utils import (
     get_test_cifar10_dataloader,
-    get_cifar10_train_val_loaders,
+    get_train_cifar10_dataloader,
     load_untrained_model,
     run_epochs,
 )
 
 if __name__ == "__main__":
 
-    train_loader, _ = get_cifar10_train_val_loaders()
+    train_loader = get_train_cifar10_dataloader()
     test_loader = get_test_cifar10_dataloader()
 
     n_epochs = 300
