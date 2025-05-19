@@ -392,7 +392,7 @@ def load_trained_model(device: str = "cuda") -> tuple[Module, float]:
     return model, acc
 
 def load_trained_grouped_model(group_type: str, device: str = "cuda") -> Module:
-    res = torch.load("train_checkpoint/model_train_grouped1.pth")
+    res = torch.load(f"train_checkpoint/model_train_{group_type}.pth")
     grouped_model = model_functions[group_type]()
     grouped_model.load_state_dict(res["net"])
     grouped_model.to(device)

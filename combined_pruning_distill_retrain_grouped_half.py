@@ -53,6 +53,6 @@ if __name__ == "__main__":
             n_epochs=n_epochs,
             half=True,
             teacher=teacher,
-            checkpoint_file_name="combined_pruning_distill_retrain_{group_type}_half_us_{amount}"
+            checkpoint_file_name=f"combined_pruning_distill_retrain_{group_type}_half_us_{amount}"
         )
 
